@@ -650,6 +650,12 @@ def deploy(
             the trtllm backend).
         legacy_ckpt (bool): Indicates whether the checkpoint is in the legacy format. Default: False
     """
+    warnings.warn(
+        "The 'deploy' function is deprecated and will be removed in NeMo FW 25.09 container release. "
+        "For evaluation functionality, please use the new Eval repository: https://github.com/NVIDIA-NeMo/Eval",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     import os
 
     import uvicorn
@@ -801,6 +807,12 @@ def evaluate(
         adapter_cfg (AdapterConfig): configuration for adapters, the object between becnhmark and endpoint.
             Default: None.
     """
+    warnings.warn(
+        "The 'evaluate' function is deprecated and will be removed in NeMo FW 25.09 container release. "
+        "For evaluation functionality, please use the new Eval repository: https://github.com/NVIDIA-NeMo/Eval",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from nemo.collections.llm.evaluation.base import _legacy_evaluate, find_framework, wait_for_fastapi_server
 
     if target_cfg.api_endpoint.nemo_checkpoint_path is not None:
@@ -1172,7 +1184,7 @@ def generate(
     )
 
     if trainer.strategy.expert_model_parallel_size > 1:
-        gathered_results = results_on_this_dp_rank
+        gathered_results = [r.generated_text if text_only else r for r in results_on_this_dp_rank]
     else:
         gathered_results = [None] * dp_size
 
@@ -1364,9 +1376,16 @@ def _validate_config(
                         model.config.seq_length % (trainer.strategy.context_parallel_size * 2) == 0
                     ), 'Sequence length must be divisible by 2 * context parallel size if context parallel is used.'
                 if isinstance(data, FineTuningDataModule):
-                    assert model.config.calculate_per_token_loss, (
-                        "When finetuning with CP>1, " "model.config.calculate_per_token_loss must be True"
-                    )
+                    # check calculate_per_token_loss to be True
+                    # check average_in_collective to be False
+                    # for context parallel to solve the issue of nan loss on ranks with all tokens masked
+                    # (only happens in SFT)
+                    assert (
+                        model.config.calculate_per_token_loss
+                    ), "When finetuning with CP>1, model.config.calculate_per_token_loss must be True"
+                    assert (
+                        not trainer.strategy.ddp_config.average_in_collective
+                    ), "When finetuning with CP>1, average_in_collective must be False"
 
         # EP validation
         if trainer.strategy.expert_model_parallel_size > 1:
